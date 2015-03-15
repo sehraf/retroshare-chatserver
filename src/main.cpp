@@ -63,6 +63,19 @@ int generateGxsId(const std::string& name)
 	return 0;
 }
 
+int generateAndSetId(const std::string &name, RsGxsId &id)
+{
+	if(generateGxsId(name) != 0)
+		// geneation failed and error was already printed -> just return
+		return 1;
+
+	// pick first ID that is the newly generated one
+	std::list<RsGxsId> ids;
+	rsIdentity->getOwnIds(ids);
+	id = ids.front();
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	if (!DirectoryExists(certificatePath.c_str()))
@@ -140,71 +153,110 @@ int main(int argc, char **argv)
 	/* Disable all Turtle Routing and tunnel requests */
 	rsConfig->setOperatingMode(RS_OPMODE_NOTURTLE);
 
-	// give the core some time to start up fully
-	// otherwise the GXS IDs might not be setup
-	sleep(10);
-
-	// get GXS Id
-	RsGxsId id;
-	std::list<RsGxsId> ids;
-	rsIdentity->getOwnIds(ids);
-
-	if(ids.empty()) {
-		// generate a new ID
-		std::cout << "no GXS ID found -> generating a new one" << std::endl;
-
-		if(generateGxsId(name) != 0)
-			// geneation failed and error was already printed -> just return
-			return 1;
-
-		// pick first ID that is the newly generated one
+	// set up GXS ID
+	RsGxsId gxsId(cs_gxsId);
+	if(!gxsId.isNull()) {
+		// we have an ID - still need to verify that it actualy exists
+		std::list<RsGxsId> ids;
 		rsIdentity->getOwnIds(ids);
-		id = ids.front();
-	} else {
-		// find gxs id with suitable name
+
+		// wait for max. 60 seconds
+		int16_t counter = 0;
+		while(ids.empty() && counter++ < 12)
+		{
+			sleep(5);
+			rsIdentity->getOwnIds(ids);
+		}
+
+		if(ids.empty()) {
+			std::cerr << "Error: unabled to find any GXS ID" << std::endl;
+			return 1;
+		}
+
+		std::cout << "searching for GXS ID " << gxsId.toStdString() << std::endl;
+		bool found = false;
 		std::list<RsGxsId>::iterator it;
-		RsIdentityDetails details;
 		for(it = ids.begin(); it != ids.end(); ++it) {
-			// slightly ugly but needed since the details might not be available on the first request
-			// first request
-			rsIdentity->getIdDetails(*it, details);
-			// wait
-			sleep(1);
-			// second request
-			rsIdentity->getIdDetails(*it, details);
-			std::cout << "GXS ID: " << details.mNickname << std::endl;
-			if(details.mNickname == name) {
-				id = *it;
-				std::cout << "choosing this one: " << id.toStdString() << std::endl;
+			std::cout << "GXS ID: " << it->toStdString() << " - ";
+			if(*it == gxsId) {
+				std::cout << "OK!" << std::endl;
+				found = true;
 				break;
 			}
+			std::cout << "no..." << std::endl;
 		}
 
-		if(id.isNull())
+		if(!found) {
+			std::cerr << "Error: unabled to find correct GXS ID (" << gxsId.toStdString() << ")" << std::endl;
+			return 1;
+		}
+	} else { // if(!id.isNull())
+		// no ID given -> pick one based in the nickname
+		gxsId.clear();
+		std::list<RsGxsId> ids;
+		rsIdentity->getOwnIds(ids);
+
+		// wait for max. 60 seconds
+		int16_t counter = 0;
+		while(ids.empty() && counter++ < 12)
 		{
-			// assume that a suitable ID isn't generated yet
-			std::cout << "no suitable GXS ID found -> generating new one" << std::endl;
-
-			if(generateGxsId(name) != 0)
-				// geneation failed and error was already printed -> just return
-				return 1;
-
-			// pick first ID that is the newly generated one
+			sleep(5);
 			rsIdentity->getOwnIds(ids);
-			id = ids.front();
 		}
-	}
+
+		if(ids.empty()) {
+			if(!cs_genNewId) {
+				std::cerr << "Error: unable to find any GXS ID and generation is turned off" << std::endl;
+				return 1;
+			}
+
+			std::cout << "no GXS ID found -> generating a new one" << std::endl;
+			if(!generateAndSetId(cs_nickname, gxsId))
+				return 1;
+		} else { //if(ids.empty())
+			// find gxs id with suitable name
+			std::list<RsGxsId>::iterator it;
+			RsIdentityDetails details;
+			for(it = ids.begin(); it != ids.end(); ++it) {
+				// slightly ugly but needed since the details might not be available on the first request
+				// first request
+				rsIdentity->getIdDetails(*it, details);
+				// wait
+				sleep(2);
+				// second request
+				rsIdentity->getIdDetails(*it, details);
+				std::cout << "GXS ID: " << details.mNickname;
+				if(details.mNickname == cs_nickname) {
+					gxsId = *it;
+					std::cout << " - choosing this one: " << gxsId.toStdString() << std::endl;
+					break;
+				}
+				std::cout << std::endl;
+			}
+
+			if(gxsId.isNull()) {
+				if(!cs_genNewId) {
+					std::cerr << "Error: no suitable GXS ID found and generation is turned off" << std::endl;
+					return 1;
+				}
+
+				if(!generateAndSetId(cs_nickname, gxsId))
+					return 1;
+			}
+			// ready to go
+		} // if(ids.empty())
+	} // if(!id.isNull())
 
 	// last sanity check - should not occur but you never know ...
-	if(id.isNull())
+	if(gxsId.isNull())
 	{
 		std::cerr << "Error: can't find/generate suitable GXS Id" << std::endl;
 		return 1;
 	}
-	rsMsgs->setDefaultIdentityForChatLobby(id);
+	rsMsgs->setDefaultIdentityForChatLobby(gxsId);
 
 	// start chatserver
-	Chatserver *chatserver = new Chatserver(id);
+	Chatserver *chatserver = new Chatserver(gxsId);
 	while (true)
 	{
 			sleep(1);

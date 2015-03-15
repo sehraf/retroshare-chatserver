@@ -28,7 +28,19 @@
 const std::string certificatePath = "/home/user/.retroshare/chatserver/NEWCERTS/"; // must end with a slash !
 const std::string storagePath = "/home/user/.retroshare/chatserver/STORAGE/"; // must end with a slash !
 const std::string temporaryFriendsFile = "/home/user/.retroshare/chatserver/friend_fifo.txt";
-const std::string name = "Chatserver";
+
+/*
+ * Since RetroShare 0.6 a GXS ID is required to chat.
+ * The chatserver can generate an anon ID on it's own or use a given one.
+ *
+ * When no fixed ID is given the first ID that equals the name will be choosen
+ * otherwise a new one will be created (when generation is enabled).
+ *
+ * When a GXS ID is given it will be preferred.
+ */
+const std::string cs_nickname = "Chatserver";
+const bool cs_genNewId = false;
+const std::string cs_gxsId = "";
 
 class Chatserver
 {
